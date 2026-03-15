@@ -59,7 +59,7 @@ static struct guestfs_application2_list *list_applications_deb (guestfs_h *g, co
 static struct guestfs_application2_list *list_applications_pacman (guestfs_h *g, const char *root);
 static struct guestfs_application2_list *list_applications_apk (guestfs_h *g, const char *root);
 static struct guestfs_application2_list *list_applications_windows (guestfs_h *g, const char *root);
-static void add_application (guestfs_h *g, struct guestfs_application2_list *, const char *name, const char *display_name, int32_t epoch, const char *version, const char *release, const char *arch, const char *install_path, const char *publisher, const char *url, const char *source, const char *summary, const char *description, const char *class_);
+static void add_application (guestfs_h *g, struct guestfs_application2_list *, size_t *alloc_len, const char *name, const char *display_name, int32_t epoch, const char *version, const char *release, const char *arch, const char *install_path, const char *publisher, const char *url, const char *source, const char *summary, const char *description, const char *class_);
 static void sort_applications (struct guestfs_application2_list *);
 
 /* The deprecated guestfs_inspect_list_applications call, which is now
@@ -208,6 +208,7 @@ list_applications_deb (guestfs_h *g, const char *root)
   apps = safe_malloc (g, sizeof *apps);
   apps->len = 0;
   apps->val = NULL;
+  size_t alloc_len = 0;
 
   /* Read the temporary file.  Each package entry is separated by
    * a blank line.
@@ -301,7 +302,7 @@ list_applications_deb (guestfs_h *g, const char *root)
     }
     else if (STREQ (line, "")) {
       if (installed_flag && name && version && (epoch >= 0))
-        add_application (g, apps, name, "", epoch, version, release ? : "",
+        add_application (g, apps, &alloc_len, name, "", epoch, version, release ? : "",
                          arch ? : "", "", "", url ? : "", source ? : "",
                          summary ? : "", description ? : "", "");
       free (name);
@@ -358,6 +359,7 @@ list_applications_pacman (guestfs_h *g, const char *root)
   apps = safe_malloc (g, sizeof *apps);
   apps->len = 0;
   apps->val = NULL;
+  size_t alloc_len = 0;
 
   for (i = 0; i < local_db->len; i++) {
     curr = &local_db->val[i];
@@ -436,7 +438,7 @@ list_applications_pacman (guestfs_h *g, const char *root)
       goto after_add_application;
 
     if ((epoch >= 0) && (ver[0] != '\0') && (rel[0] != '\0'))
-      add_application (g, apps, name, "", epoch, ver, rel, arch, "", "",
+      add_application (g, apps, &alloc_len, name, "", epoch, ver, rel, arch, "", "",
                        url ? : "", "", "", desc ? : "", "");
 
   after_add_application:
@@ -492,6 +494,7 @@ list_applications_apk (guestfs_h *g, const char *root)
   apps = safe_malloc (g, sizeof *apps);
   apps->len = 0;
   apps->val = NULL;
+  size_t alloc_len = 0;
 
   /* Read the temporary file.  Each package entry is separated by
    * a blank line.  Each package line is <character>:<field>.
@@ -510,7 +513,7 @@ list_applications_apk (guestfs_h *g, const char *root)
     switch (line[0]) {
     case '\0':
       if (name && version && (epoch >= 0))
-        add_application (g, apps, name, "", epoch, version, release ? : "",
+        add_application (g, apps, &alloc_len, name, "", epoch, version, release ? : "",
                          arch ? : "", "", "", url ? : "", "", "",
                          description ? : "", "");
       free (name);
@@ -581,7 +584,7 @@ list_applications_apk (guestfs_h *g, const char *root)
   return ret;
 }
 
-static void list_applications_windows_from_path (guestfs_h *g, struct guestfs_application2_list *apps, const char **path, size_t path_len);
+static void list_applications_windows_from_path (guestfs_h *g, struct guestfs_application2_list *apps, size_t *alloc_len, const char **path, size_t path_len);
 static const char *get_class_from_windows_app (guestfs_h *g, const char *name, const char *display_name, const char *publisher);
 
 static struct guestfs_application2_list *
@@ -603,11 +606,12 @@ list_applications_windows (guestfs_h *g, const char *root)
   ret = safe_malloc (g, sizeof *ret);
   ret->len = 0;
   ret->val = NULL;
+  size_t alloc_len = 0;
 
   /* Ordinary native applications. */
   const char *hivepath[] =
     { "Microsoft", "Windows", "CurrentVersion", "Uninstall" };
-  list_applications_windows_from_path (g, ret, hivepath,
+  list_applications_windows_from_path (g, ret, &alloc_len, hivepath,
                                        sizeof hivepath / sizeof hivepath[0]);
 
   /* 32-bit emulated Windows apps running on the WOW64 emulator.
@@ -615,7 +619,7 @@ list_applications_windows (guestfs_h *g, const char *root)
    */
   const char *hivepath2[] =
     { "WOW6432node", "Microsoft", "Windows", "CurrentVersion", "Uninstall" };
-  list_applications_windows_from_path (g, ret, hivepath2,
+  list_applications_windows_from_path (g, ret, &alloc_len, hivepath2,
                                        sizeof hivepath2 / sizeof hivepath2[0]);
 
   guestfs_hivex_close (g);
@@ -625,6 +629,7 @@ list_applications_windows (guestfs_h *g, const char *root)
 static void
 list_applications_windows_from_path (guestfs_h *g,
                                      struct guestfs_application2_list *apps,
+                                     size_t *alloc_len,
                                      const char **path, size_t path_len)
 {
   CLEANUP_FREE_HIVEX_NODE_LIST struct guestfs_hivex_node_list *children = NULL;
@@ -683,7 +688,7 @@ list_applications_windows_from_path (guestfs_h *g,
 
         class_ = get_class_from_windows_app (g, name, display_name, publisher);
 
-        add_application (g, apps, name, display_name, 0,
+        add_application (g, apps, alloc_len, name, display_name, 0,
                          version ? : "",
                          "", "",
                          install_path ? : "",
@@ -738,6 +743,7 @@ get_class_from_windows_app (guestfs_h *g,
 
 static void
 add_application (guestfs_h *g, struct guestfs_application2_list *apps,
+                 size_t *alloc_len,
                  const char *name, const char *display_name, int32_t epoch,
                  const char *version, const char *release, const char *arch,
                  const char *install_path,
@@ -745,9 +751,12 @@ add_application (guestfs_h *g, struct guestfs_application2_list *apps,
                  const char *source, const char *summary,
                  const char *description, const char *class_)
 {
+  if (apps->len >= *alloc_len) {
+    *alloc_len = *alloc_len ? *alloc_len * 2 : 8;
+    apps->val = safe_realloc (g, apps->val,
+                              *alloc_len * sizeof (struct guestfs_application2));
+  }
   apps->len++;
-  apps->val = safe_realloc (g, apps->val,
-                            apps->len * sizeof (struct guestfs_application2));
   apps->val[apps->len-1].app2_name = safe_strdup (g, name);
   apps->val[apps->len-1].app2_display_name = safe_strdup (g, display_name);
   apps->val[apps->len-1].app2_epoch = epoch;
