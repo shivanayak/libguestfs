@@ -890,6 +890,14 @@ receive_file_data (guestfs_h *g, void **buf_r)
   }
   xdr_destroy (&xdr);
 
+  if (chunk.cancel != 0 && chunk.cancel != 1) {
+    error (g, _("receive_file_data: chunk.cancel = 0x%x, "
+                "lost protocol synchronization"),
+           (unsigned) chunk.cancel);
+    free (chunk.data.data_val);
+    return -1;
+  }
+
   if (chunk.cancel) {
     if (g->user_cancel)
       guestfs_int_error_errno (g, EINTR, _("operation cancelled by user"));
